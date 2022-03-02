@@ -6,8 +6,10 @@ import (
 	style "charmtest/internal/styles"
 	"charmtest/internal/types"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -37,6 +39,28 @@ func NewMainView(selections []*types.MenuEntry) *MainView {
 		menuSelections: selections,
 		boxes:          []tea.Model{menu, pager},
 	}
+}
+
+func NewMenuEntryFromMarkdown(filePath string) (*types.MenuEntry, error) {
+	// read the entire file into bytes
+	fileBytes, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+	// the title should be the name of the file
+	title := fileNameFromPath(filePath)
+	return &types.MenuEntry{
+		Name:  title,
+		Value: fileBytes,
+	}, nil
+}
+
+func fileNameFromPath(path string) string {
+	base := filepath.Base(path)
+	if pos := strings.LastIndexByte(base, '.'); pos != -1 {
+		return base[:pos]
+	}
+	return base
 }
 
 func (m *MainView) Init() tea.Cmd {
