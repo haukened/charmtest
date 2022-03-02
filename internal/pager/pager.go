@@ -18,20 +18,20 @@ const useHighPerformanceRenderer = false
 
 type Bubble struct {
 	title      string
-	content    string
+	initial    *types.MenuEntry
 	ready      bool
 	styles     *style.Styles
 	viewport   viewport.Model
 	lastHeight int
 	lastWidth  int
+	err        error
 }
 
 func NewBubble(s *style.Styles, initial *types.MenuEntry, logFile *os.File) *Bubble {
 	log.SetOutput(logFile)
 	return &Bubble{
 		styles:  s,
-		title:   initial.Name,
-		content: initial.Value,
+		initial: initial,
 	}
 }
 
@@ -50,15 +50,23 @@ func (m *Bubble) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		headerHeight := lipgloss.Height(m.headerView())
 		footerHeight := lipgloss.Height(m.footerView())
 		verticalMarginHeight := headerHeight + footerHeight
+		allowedHeight := msg.Height - verticalMarginHeight - (2 * m.styles.App.GetVerticalFrameSize()) - (2 * m.styles.Pager.GetVerticalFrameSize())
 		if !m.ready {
-			m.viewport = viewport.New(msg.Width, verticalMarginHeight)
+			var content string
+			content, m.err = m.initial.RenderBytes()
+			if m.err != nil {
+				cmds = append(cmds, m.sendErrorMessage)
+				return m, tea.Batch(cmds...)
+			}
+			m.viewport = viewport.New(msg.Width, allowedHeight)
 			m.viewport.YPosition = headerHeight
 			m.viewport.HighPerformanceRendering = useHighPerformanceRenderer
-			m.viewport.SetContent(m.content)
+			m.viewport.SetContent(content)
+			m.title = m.initial.Name
 			m.ready = true
 		} else {
 			m.viewport.Width = msg.Width
-			m.viewport.Height = verticalMarginHeight
+			m.viewport.Height = allowedHeight
 		}
 		m.lastWidth = msg.Width
 		m.lastHeight = verticalMarginHeight
@@ -67,12 +75,16 @@ func (m *Bubble) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case *types.MenuEntry:
 		m.title = msg.Name
-		m.content = msg.Value
-		m.viewport.SetContent(wordwrap.String(m.content, m.lastWidth-2))
+		var content string
+		content, m.err = msg.RenderBytes()
+		if m.err != nil {
+			cmds = append(cmds, m.sendErrorMessage)
+			return m, tea.Batch(cmds...)
+		}
+		m.viewport.SetContent(wordwrap.String(content, m.lastWidth-2))
 		m.viewport.GotoTop()
 	}
 
-	log.Printf("PAGER Content Width: %d", len(m.content))
 	m.viewport, cmd = m.viewport.Update(msg)
 	cmds = append(cmds, cmd)
 
@@ -96,6 +108,15 @@ func (m *Bubble) footerView() string {
 	info := m.styles.PagerFooter.Render(fmt.Sprintf("%3.f%%", m.viewport.ScrollPercent()*100))
 	line := strings.Repeat("-", max(0, m.viewport.Width-lipgloss.Width(info)))
 	return lipgloss.JoinHorizontal(lipgloss.Center, line, info)
+}
+
+func (m *Bubble) sendErrorMessage() tea.Msg {
+	var errs []interface{}
+	errs = append(errs, m.err)
+	return types.LogMessage{
+		Format: "%s",
+		A:      errs,
+	}
 }
 
 func max(a, b int) int {
